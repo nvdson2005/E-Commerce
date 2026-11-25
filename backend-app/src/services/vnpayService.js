@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const querystring = require('querystring');
 const config = require('../config/env');
 
 const pad = (value, length = 2) => String(value).padStart(length, '0');

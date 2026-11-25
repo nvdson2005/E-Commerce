@@ -4,7 +4,6 @@ const { loadComponents, normalizeBuildItems, evaluateBuild } = require('./builde
 const {
   estimateCapabilities,
   compareCapabilities,
-  threadsForTier,
   gpuKindFromName,
   profileFromParts,
 } = require('../utils/workloads');

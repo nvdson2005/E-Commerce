@@ -1,0 +1,69 @@
+# Triển khai lên Azure VM sau khi workflow CI chạy xong và xanh trên nhánh main.
+# Cần người duyệt (Required reviewers của environment production) trước khi chạy.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Chỉ chạy khi CI trên main thành công (workflow_run luôn dùng file này từ nhánh mặc định).
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Bật "Required reviewers" cho environment này trong Settings > Environments để có bước duyệt tay.
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Triển khai đúng commit đã qua CI, không phải commit mới nhất của main.
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Cấu hình SSH
+        env:
+          AZURE_SSH_KEY: ${{ secrets.AZURE_SSH_KEY }}
+          AZURE_KNOWN_HOSTS: ${{ secrets.AZURE_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$AZURE_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$AZURE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Đồng bộ mã nguồn lên VM
+        env:
+          TARGET: ${{ secrets.AZURE_USER }}@${{ secrets.AZURE_HOST }}
+          APP_DIR: ${{ vars.AZURE_APP_DIR }}
+        run: |
+          # .env (bí mật thật) và dữ liệu nằm trên VM nên không bị ghi đè hay xoá.
+          rsync -az --delete \
+            --exclude '.git' --exclude '.github' --exclude '.env' \
+            --exclude 'node_modules' --exclude 'dbms-env' \
+            -e "ssh -i ~/.ssh/id_deploy" \
+            ./ "$TARGET:$APP_DIR/"
+      - name: Build và khởi động lại stack
+        env:
+          TARGET: ${{ secrets.AZURE_USER }}@${{ secrets.AZURE_HOST }}
+          APP_DIR: ${{ vars.AZURE_APP_DIR }}
+        run: |
+          # Không chạy run-migration.js hay run-seed.js ở đây: migration chạy tay khi cần.
+          ssh -i ~/.ssh/id_deploy "$TARGET" "cd $APP_DIR && docker compose up -d --build --remove-orphans"
+      - name: Kiểm tra /health/ready
+        env:
+          HOST: ${{ secrets.AZURE_HOST }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "https://$HOST/health/ready" > /dev/null; then
+              echo "Ứng dụng sẵn sàng sau $((i * 10)) giây"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Ứng dụng không sẵn sàng sau 5 phút" >&2
+          exit 1
