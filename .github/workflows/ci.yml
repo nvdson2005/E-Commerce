@@ -1,5 +1,5 @@
 # Kiểm tra tự động cho mỗi lần push và pull request:
-# - backend-unit:        unit test backend (không cần database)
+# - backend-unit:        ESLint và unit test backend (không cần database)
 # - backend-integration: tạo schema + dữ liệu mẫu trên SQL Server và MongoDB thật rồi chạy test tích hợp
 # - frontend:            ESLint và build Vite
 # - docker:              build thử image API và giao diện
@@ -31,6 +31,7 @@ jobs:
           cache: npm
           cache-dependency-path: backend-app/package-lock.json
       - run: npm ci
+      - run: npm run lint
       - run: node --check src/app.js
       - run: npm test
 
